@@ -1,0 +1,32 @@
+import numpy as np
+import pandas as pd
+
+class API_MassBalanceAnalyzer:
+    def __init__(self, mud_price_bbl=85.0, disposal_price_bbl=18.0):
+        self.mud_price = mud_price_bbl
+        self.disposal_price = disposal_price_bbl
+        self.liquid_on_cuttings_ratio = 1.0  
+
+    def calculate_interval(self, hole_in, length_ft, washout, mech_sre, target_lgs_frac):
+        v_c = 0.000971 * (hole_in**2) * length_ft * washout
+        v_h = v_c  
+        
+        v_sw = mech_sre * v_c * (1.0 + self.liquid_on_cuttings_ratio)
+        mud_lost_on_cuttings = mech_sre * v_c * self.liquid_on_cuttings_ratio
+        v_c_retained = v_c * (1.0 - mech_sre)
+        
+        v_m_volumetric = v_h + mud_lost_on_cuttings
+        v_m_dilution = v_c_retained / target_lgs_frac if target_lgs_frac > 0 else v_m_volumetric
+        v_m_actual = max(v_m_volumetric, v_m_dilution)
+        
+        v_lw = max(0.0, v_m_actual - v_m_volumetric)
+        
+        v_d_theoretical = v_c / target_lgs_frac if target_lgs_frac > 0 else 0
+        df = v_m_actual / v_d_theoretical if v_d_theoretical > 0 else 1.0
+        e_t = (1.0 - df) * 100.0
+        e_t = max(0.0, min(e_t, 100.0))
+        
+        cost_mud = v_m_actual * self.mud_price
+        cost_disposal = (v_sw + v_lw) * self.disposal_price
+        
+        return v_m_actual, v_sw, v_lw, e_t, cost_mud, cost_disposal
