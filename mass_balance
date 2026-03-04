@@ -5,7 +5,6 @@ class API_MassBalanceAnalyzer:
     def __init__(self, mud_price_bbl=85.0, disposal_price_bbl=18.0):
         self.mud_price = mud_price_bbl
         self.disposal_price = disposal_price_bbl
-        self.liquid_on_cuttings_ratio = 1.0  
 
     def calculate_interval(self, hole_in, length_ft, washout, mech_sre, target_lgs_frac):
         v_c = 0.000971 * (hole_in**2) * length_ft * washout
