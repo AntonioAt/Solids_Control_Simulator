@@ -10,57 +10,22 @@ from equipment import (
     EquipmentSystemManager, PARTICLE_BINS, build_and_evaluate_equipment
 )
 
+# =============================================================================
+# HELPER FUNCTION
+# =============================================================================
+@st.cache_data
+def generate_dynamic_log(start_d, end_d, pp_base, fg_base, rop_base, step_ft=500):
+    """Generates synthetic depth data points for simulation logging."""
+    log = []
+    points = np.arange(start_d + step_ft, end_d, step_ft)
+    if len(points) == 0 or points[-1] != end_d: 
+        points = np.append(points, end_d)
+        
+    for d in points:
+        log.append((round(d, 1), round(9.0 + (d/2000.0), 2), round(pp_base + (d/3000.0), 2), round(fg_base + (d/2000.0), 2), rop_base))
+    return log
 
-# --- 2. THE OOP ADAPTER (PENERJEMAH UI KE MESIN OOP) ---
-def build_and_evaluate_equipment(shaker_meshes, ds_on, dl_on, mc_on, cf_rpms):
-    equipment_objects = []
-    labels = []
-
-    # 1. Instantiate Shakers
-    if shaker_meshes:
-        for mesh in sorted(shaker_meshes):
-            equipment_objects.append(ShaleShaker(api_mesh=mesh))
-            labels.append(f"Sh({mesh})")
-
-    # 2. Instantiate Hydrocyclones
-    if ds_on:
-        equipment_objects.append(Desander())
-        labels.append("DS")
-    if dl_on:
-        equipment_objects.append(Desilter())
-        labels.append("DL")
-    if mc_on:
-        equipment_objects.append(MudCleaner())
-        labels.append("MC")
-
-    # 3. Instantiate Centrifuges
-    if cf_rpms:
-        for rpm in sorted(cf_rpms):
-            equipment_objects.append(Centrifuge(rpm=rpm))
-            labels.append(f"CF({rpm})")
-
-    # Membuat System Manager Kaskade
-    manager = EquipmentSystemManager(equipment_objects)
-
-    # --- SIMULASI MOCK-UP PSD TEORETIS ---
-    # Asumsi 100 satuan volume LGS, didistribusikan merata di 10 ukuran partikel
-    mock_psd_in = np.array([10.0] * len(PARTICLE_BINS), dtype=float)
-    total_input_volume = np.sum(mock_psd_in)
-
-    # Menjalankan fisika Kaskade Kurva Tromp
-    psd_out, total_discarded, total_mud_lost, daily_cost, chem_pen = manager.process_system(mock_psd_in)
-
-    # Menghitung efisiensi skalar tunggal untuk mesin fisika lama
-    effective_mech_X = total_discarded / total_input_volume
-
-    # Diskon Sinergi Barite Recovery (Jika CF >= 2)
-    if len(cf_rpms) >= 2:
-        chem_pen *= 0.40  
-        labels.append("[Barite Rec.]")
-
-    return effective_mech_X, daily_cost, chem_pen, labels
-
-# --- 3. STREAMLIT FRONT-END UI ---
+# --- STREAMLIT FRONT-END UI ---
 st.set_page_config(page_title="Drilling & Solid Control Simulator", layout="wide")
 
 if "num_scenarios" not in st.session_state: st.session_state.num_scenarios = 2
