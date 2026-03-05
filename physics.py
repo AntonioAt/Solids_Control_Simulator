@@ -1,5 +1,5 @@
 import numpy as np
-from src.equipment import EquipmentSystemManager # Assuming equipment.py is in the src folder
+from equipment import EquipmentSystemManager # Assuming equipment.py is in the src folder
 
 class APIMassBalanceAnalyzer:
     def __init__(self, mud_price_bbl=85.0, disposal_price_bbl=18.0):
