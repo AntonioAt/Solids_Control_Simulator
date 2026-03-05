@@ -75,36 +75,37 @@ class AdvancedDrillingPhysics:
         return round((base_mw * (1.0 - (lgs_pct/100.0))) + (21.7 * (lgs_pct/100.0)), 2)
 
     def calculate_rheology(self, lgs_pct, temp_f):
-        """
-        Calculates degraded rheology using Krieger-Dougherty (Caenn & Darley)
-        and back-calculates API 13D Fann reading projections.
-        """
-        phi = lgs_pct / 100.0
-        phi_m = 0.60
-        intrinsic_visc = 2.5
-        
-        # Krieger-Dougherty equation for relative viscosity
-        # Capped safely to prevent mathematical overflow at 60% solids
-        if phi < 0.55:
-            rel_visc = (1.0 - (phi / phi_m)) ** (-intrinsic_visc * phi_m)
-        else:
-            rel_visc = 50.0 
 
-        # Degraded PV and YP based on literature
-        actual_pv = self.base_pv * rel_visc
-        actual_yp = self.base_yp * (1.0 + (1.5 * phi)) # Yield Point scales linearly with surface area of fines
-        actual_tau_y = self.base_tau_y * (1.0 + (2.0 * phi))
+    phi = lgs_pct
 
-        # Back-calculate API RP 13D Fann Dial Readings
-        r300 = actual_pv + actual_yp
-        r600 = actual_pv + r300
-        
-        # Recalculate Power Law (API RP 13D section 4) metrics for hydraulics
-        n_api = 3.32 * np.log10(r600 / r300) if r300 > 0 else 1.0
-        k_api = r300 / (511 ** n_api) if n_api > 0 else 0.0
+    # --- PV increase due to LGS ---
+    pv_factor = np.exp(0.25 * (phi/10))
+    actual_pv = self.base_pv * pv_factor
 
-        return (round(n_api, 3), round(k_api, 3), round(actual_tau_y, 1), 
-                round(actual_pv, 1), round(actual_yp, 1), round(r600, 1), round(r300, 1))
+    # --- YP increase due to clay surface area ---
+    yp_factor = 1 + (0.12 * phi)
+    actual_yp = self.base_yp * yp_factor
+
+    # Yield stress scaling
+    actual_tau_y = self.base_tau_y * (1 + (1.5 * phi/10))
+
+    # API dial readings
+    r300 = actual_pv + actual_yp
+    r600 = actual_pv + r300
+
+    # Power law parameters
+    n_api = 3.32 * np.log10(r600 / r300) if r300 > 0 else 1.0
+    k_api = r300 / (511 ** n_api) if n_api > 0 else 0.0
+
+    return (
+        round(n_api,3),
+        round(k_api,3),
+        round(actual_tau_y,1),
+        round(actual_pv,1),
+        round(actual_yp,1),
+        round(r600,1),
+        round(r300,1)
+    )
 
     def calculate_hydraulics(self, n, K, tau_y, actual_mw_ppg, depth_ft, hole, dp, gpm, pp, rop_max):
         """
