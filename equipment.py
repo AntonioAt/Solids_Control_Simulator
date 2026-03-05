@@ -32,7 +32,7 @@ class SolidControlEquipment(ABC):
 
         # Array of discarded particle volumes
         psd_discarded = psd_in_array * separation_curve
-        
+
         # Array of particle volumes passing to the next equipment (Cascade effect)
         psd_passed = psd_in_array - psd_discarded
 
@@ -41,6 +41,8 @@ class SolidControlEquipment(ABC):
         mud_lost = solid_vol_discarded * self.loc_ratio
 
         return psd_passed, solid_vol_discarded, mud_lost
+
+# --- SPECIFIC EQUIPMENT CLASSES ---
 
 class ShaleShaker(SolidControlEquipment):
     def __init__(self, api_mesh=120):
@@ -53,11 +55,23 @@ class Desander(SolidControlEquipment):
         # Cuts sand particles (>40 microns). Very high LOC if used without an underflow screen.
         super().__init__(name="Desander", base_cost=300.0, chem_penalty=200.0, base_loc=2.0, d50_microns=40.0, sharpness=2.0)
 
+class Desilter(SolidControlEquipment):
+    def __init__(self):
+        # Cuts silt particles (>20 microns). High LOC.
+        super().__init__(name="Desilter", base_cost=400.0, chem_penalty=300.0, base_loc=1.5, d50_microns=20.0, sharpness=2.5)
+
+class MudCleaner(SolidControlEquipment):
+    def __init__(self):
+        # Hydrocyclones positioned over a shaker screen. Recovers more fluid than a standard desilter.
+        super().__init__(name="Mud Cleaner", base_cost=800.0, chem_penalty=150.0, base_loc=0.8, d50_microns=15.0, sharpness=3.0)
+
 class Centrifuge(SolidControlEquipment):
     def __init__(self, rpm=2500):
         # Cuts ultra-fine/colloidal particles (~ 5 microns). Low LOC (Dry/Paste discharge).
         d50_approx = max(2.0, 15.0 - (rpm / 500.0))
         super().__init__(name=f"Centrifuge ({rpm} RPM)", base_cost=1500.0, chem_penalty=1200.0, base_loc=0.4, d50_microns=d50_approx, sharpness=1.5)
+
+# --- EQUIPMENT SYSTEM MANAGER ---
 
 class EquipmentSystemManager:
     def __init__(self, equipment_list):
@@ -97,3 +111,57 @@ class EquipmentSystemManager:
             "total_daily_cost": total_daily_cost,
             "total_chem_penalty": total_chem_penalty
         }
+
+# --- OOP FACTORY ADAPTER ---
+
+def build_and_evaluate_equipment(shaker_meshes, ds_on, dl_on, mc_on, cf_rpms):
+    """
+    Factory function: Translates raw UI parameters into instantiated physics objects,
+    runs a theoretical cascade preview, and returns the metrics for the UI dashboard.
+    """
+    equipment_objects = []
+    labels = []
+
+    # 1. Instantiate Primary Shakers
+    if shaker_meshes:
+        for mesh in sorted(shaker_meshes):
+            equipment_objects.append(ShaleShaker(api_mesh=mesh))
+            labels.append(f"Sh({mesh})")
+
+    # 2. Instantiate Hydrocyclones
+    if ds_on:
+        equipment_objects.append(Desander())
+        labels.append("DS")
+    if dl_on:
+        equipment_objects.append(Desilter())
+        labels.append("DL")
+    if mc_on:
+        equipment_objects.append(MudCleaner())
+        labels.append("MC")
+
+    # 3. Instantiate Centrifuges
+    if cf_rpms:
+        for rpm in sorted(cf_rpms):
+            equipment_objects.append(Centrifuge(rpm=rpm))
+            labels.append(f"CF({rpm})")
+
+    manager = EquipmentSystemManager(equipment_objects)
+
+    # Theoretical PSD mock-up to generate preview metrics for the UI sidebar
+    mock_psd_in = np.array([10.0] * len(PARTICLE_BINS), dtype=float)
+    total_input_volume = np.sum(mock_psd_in)
+
+    cascade_results = manager.process_system(mock_psd_in)
+    
+    total_discarded = cascade_results["total_solids_discarded"]
+    daily_cost = cascade_results["total_daily_cost"]
+    chem_pen = cascade_results["total_chem_penalty"]
+
+    effective_mech_X = total_discarded / total_input_volume if total_input_volume > 0 else 0
+
+    # Synergy Discount for Dual Centrifuges
+    if len(cf_rpms) >= 2:
+        chem_pen *= 0.40  
+        labels.append("[Barite Rec.]")
+
+    return effective_mech_X, daily_cost, chem_pen, labels, equipment_objects
