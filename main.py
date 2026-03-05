@@ -3,11 +3,11 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from physics import API_MassBalanceAnalyzer, AdvancedDrillingPhysics, generate_dynamic_log
+from physics import APIMassBalanceAnalyzer, AdvancedDrillingPhysics
 from economics import EconomicsAnalyzer
 from equipment import (
-    SolidControlEquipment, ShaleShaker, Desander, Centrifuge, 
-    EquipmentSystemManager, PARTICLE_BINS
+    SolidControlEquipment, ShaleShaker, Desander, Desilter, MudCleaner, Centrifuge, 
+    EquipmentSystemManager, PARTICLE_BINS, build_and_evaluate_equipment
 )
 
 
