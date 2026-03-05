@@ -3,7 +3,6 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# ---> JEMBATAN PENGHUBUNG KE FILE-FILE LAIN <---
 from physics import API_MassBalanceAnalyzer, AdvancedDrillingPhysics, generate_dynamic_log
 from economics import EconomicsAnalyzer
 from equipment import (
@@ -336,4 +335,4 @@ if st.session_state.sim_done:
             })
             st.dataframe(df, use_container_width=True, hide_index=True)
 else:
-    st.info("👈 Konfigurasi parameter sumur dan pengaturan alat di menu samping, lalu klik tombol 'Run Physics & Mass Balance'.")
+    st.info("👈 Configurate your well parameters on left panel, and press run.")
