@@ -68,3 +68,5 @@ class AdvancedDrillingPhysics:
         rop = rop_max * np.exp(-0.3 * max(0, ecd - pp))
 
         return round(ecd, 2), round(rop, 1)
+
+# Force rebuild container
