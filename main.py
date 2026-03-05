@@ -129,10 +129,10 @@ for i in range(st.session_state.num_scenarios):
 SCENARIO_COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e22', '#1abc9c']
 
 # =============================================================================
-# CORE SIMULATION ENGINE TRIGGER (Dynamic Step-by-Step Mass Balance)
+# CORE SIMULATION ENGINE TRIGGER
 # =============================================================================
 if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container_width=True):
-    with st.spinner("Processing dynamic step-by-step LGS accumulation & rheology..."):
+    with st.spinner("Processing pure natural LGS accumulation & rheology..."):
 
         target_lgs_frac = target_lgs_des / 100.0
         active_surface_volume_bbl = 1000.0  # Assumed standard active pit volume
@@ -142,9 +142,10 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
             scenarios[sc_name] = {
                 "daily_eq_cost": config["cost"], 
                 "chem_penalty": config["chem"], 
-                "mech_X": config["mech_X"], # Total mechanical separation efficiency (Et)
+                "equipment_objects": config["equipment_objects"],
+                "mech_X": config["mech_X"], 
                 "sections": [
-                    {"hole": 17.5, "dp": 5.0, "len": len_sec1, "gpm": gpm1, "wash": 1.15, "lith": lith1, "log": generate_dynamic_log(0, d1, 8.6, 11.5, 90, 100)}, # Finer step (100ft) for smoother charts
+                    {"hole": 17.5, "dp": 5.0, "len": len_sec1, "gpm": gpm1, "wash": 1.15, "lith": lith1, "log": generate_dynamic_log(0, d1, 8.6, 11.5, 90, 100)},
                     {"hole": 12.25, "dp": 5.0, "len": len_sec2, "gpm": gpm2, "wash": 1.10, "lith": lith2, "log": generate_dynamic_log(d1, d2, 9.2, 12.8, 65, 100)},
                     {"hole": 8.5, "dp": 4.0, "len": len_sec3, "gpm": gpm3, "wash": 1.05, "lith": lith3, "log": generate_dynamic_log(d2, d3, 10.4, 14.8, 45, 100)}
                 ]
@@ -152,6 +153,7 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
 
         engine = AdvancedDrillingPhysics(t600, t300, t200, t100, t6, t3)
         econ = EconomicsAnalyzer(rig_rate)
+        mass_bal = APIMassBalanceAnalyzer(mud_price, disp_price)
 
         sim_res = {k: {"depth":[],"hole":[], "rop":[],"ecd":[],"pp":[],"fg":[],"lgs":[],"total_solids":[],"lithology":[],
                        "base_mw":[],"actual_mw":[],"pv":[],"yp":[],"r600":[],"r300":[], "hb_n":[], "hb_k":[], "hb_tau":[],
@@ -163,45 +165,38 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
             mech_efficiency = sc_data["mech_X"]
             sim_res[sc_name]["api_et_avg"] = mech_efficiency * 100.0
             
-            # LGS starts clean at the beginning of the well
+            # Pure accumulation variable
             dynamic_lgs_pct = 0.0 
 
             for sec in sc_data["sections"]:
                 avg_rop = 0
                 prev_depth = sec['log'][0][0] - 100.0 if len(sec['log']) > 0 else 0.0
                 
+                # --- MACRO ECONOMICS VIA API MASS BALANCE ---
+                # This mathematically calculates the theoretical dilution cost needed for the whole section
+                mb_result = mass_bal.calculate_interval(
+                    hole_in=sec['hole'], length_ft=sec['len'], washout=sec['wash'], 
+                    target_lgs_frac=target_lgs_frac, lithology=sec['lith'], 
+                    active_equipment_list=sc_data["equipment_objects"]
+                )
+                t_vm += mb_result["v_mud_actual"]
+                t_waste += mb_result["v_surface_waste"] + mb_result["v_liquid_waste"]
+                t_mud_c += mb_result["cost_mud"]
+                t_disp_c += mb_result["cost_disposal"]
+
                 for step_data in sec['log']:
                     d, base_mw, pp, fg, rop_max = step_data
                     delta_depth = d - prev_depth
                     prev_depth = d
 
-                    # --- 1. PREDICTIVE LGS GENERATION (Formula 1) ---
-                    # Calculate cuttings volume for this specific depth increment
+                    # --- NATURAL LGS ACCUMULATION (No Artificial Reset) ---
                     v_c_step = ((sec['hole']**2) / 1029.4) * delta_depth * sec['wash']
-                    
-                    # Calculate solids that bypassed the equipment based on efficiency
                     v_retained_step = v_c_step * (1.0 - mech_efficiency)
                     
-                    # Accumulate LGS concentration in the active system
+                    # LGS grows naturally. We do NOT cap it. We let the physics engine feel the pain of high LGS.
                     dynamic_lgs_pct += (v_retained_step / active_surface_volume_bbl) * 100.0
 
-                    # --- 2. DILUTION TRIGGER / SAFETY CEILING (Formula 2) ---
-                    # If LGS breaches the target (e.g., 6%), trigger dilution protocols
-                    if dynamic_lgs_pct > target_lgs_des:
-                        # Calculate required fresh mud volume to dilute back to the safety ceiling
-                        current_lgs_vol = (dynamic_lgs_pct / 100.0) * active_surface_volume_bbl
-                        required_dilution_vol = (current_lgs_vol / target_lgs_frac) - active_surface_volume_bbl
-                        
-                        # Add to financial & mass balance accumulators
-                        t_mud_c += required_dilution_vol * mud_price
-                        t_disp_c += required_dilution_vol * disp_price
-                        t_vm += required_dilution_vol
-                        t_waste += required_dilution_vol  # Pit volume remains constant; excess is dumped
-                        
-                        # Reset the dynamic LGS back down to the target ceiling
-                        dynamic_lgs_pct = target_lgs_des
-
-                    # --- 3. DYNAMIC RHEOLOGY & HYDRAULICS ---
+                    # --- DYNAMIC RHEOLOGY & HYDRAULICS ---
                     temp = engine.get_temp_at_depth(d)
                     actual_mw = engine.calculate_actual_density(base_mw, dynamic_lgs_pct)
                     base_solids_pct = max(0.0, ((base_mw - 8.33) / (35.0 - 8.33)) * 100.0)
@@ -210,7 +205,7 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
                     hb_n, hb_k, hb_tau, pv, yp, r600, r300 = engine.calculate_rheology(dynamic_lgs_pct, temp)
                     ecd, rop = engine.calculate_hydraulics(hb_n, hb_k, hb_tau, actual_mw, d, sec['hole'], sec['dp'], sec['gpm'], pp, rop_max)
 
-                    # --- 4. DATA LOGGING ---
+                    # --- DATA LOGGING ---
                     sim_res[sc_name]["hole"].append(sec['hole']); sim_res[sc_name]["lithology"].append(sec['lith'])
                     sim_res[sc_name]["depth"].append(d); sim_res[sc_name]["rop"].append(rop)
                     sim_res[sc_name]["ecd"].append(ecd); sim_res[sc_name]["pp"].append(pp); sim_res[sc_name]["fg"].append(fg)
@@ -222,24 +217,18 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
 
                     avg_rop += rop
 
-                # Calculate macroscopic economics for the section
+                # Time and penalty calculations
                 econ_res = econ.calculate_time_cost(
-                    avg_rop=avg_rop/len(sec['log']), 
-                    length_ft=sec['len'], 
-                    actual_lgs_pct=dynamic_lgs_pct, # Use final LGS of the section for conditioning penalties
-                    target_lgs_pct=target_lgs_des,
-                    daily_equip_cost=sc_data["daily_eq_cost"], 
-                    daily_chem_penalty=sc_data["chem_penalty"]
+                    avg_rop=avg_rop/len(sec['log']), length_ft=sec['len'], 
+                    actual_lgs_pct=dynamic_lgs_pct, target_lgs_pct=target_lgs_des,
+                    daily_equip_cost=sc_data["daily_eq_cost"], daily_chem_penalty=sc_data["chem_penalty"]
                 )
                 
                 t_days += econ_res["total_days"]
                 t_invest += (sc_data["daily_eq_cost"] * econ_res["total_days"])
                 t_chem_c += econ_res["chem_penalty_cost"]
-                
-                # Base operations cost + Mud cost accumulated from the dilution triggers
-                t_cost += econ_res["total_afe_cost"] + t_mud_c + t_disp_c
+                t_cost += econ_res["total_afe_cost"] + mb_result["cost_mud"] + mb_result["cost_disposal"]
 
-            # Finalize scenario economics
             sim_res[sc_name].update({
                 "cost": t_cost, "days": t_days, "equip_invest": t_invest, 
                 "mud_cost": t_mud_c, "disp_cost": t_disp_c, "chem_cost": t_chem_c, 
@@ -249,6 +238,7 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
         st.session_state['sim_res'] = sim_res
         st.session_state['saved_configs'] = scenario_configs
         st.session_state.sim_done = True
+
 
 
 # =============================================================================
