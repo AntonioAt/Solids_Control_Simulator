@@ -4,10 +4,9 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # Memanggil mesin kalkulasi dari file terpisah (Modular)
-from physics_engine import (
-    API_MassBalanceAnalyzer, AdvancedDrillingPhysics, EconomicsAnalyzer, 
-    generate_dynamic_log, calculate_dynamic_system
-)
+from physics import API_MassBalanceAnalyzer, AdvancedDrillingPhysics, generate_dynamic_log
+from economics import EconomicsAnalyzer
+from equipment import calculate_dynamic_system
 
 st.set_page_config(page_title="Drilling & Solid Control Simulator", layout="wide")
 
