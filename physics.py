@@ -53,3 +53,50 @@ class APIMassBalanceAnalyzer:
             "cost_disposal": cost_disposal,
             "total_equip_rent": total_daily_rent
         }
+class AdvancedDrillingPhysics:
+    def __init__(self, t600, t300, t200, t100, t6, t3):
+        # Herschel-Bulkley model initialization with mathematical protections
+        self.base_tau_y = max(0.1, t3)  
+        denominator = max(0.1, t300 - self.base_tau_y)
+        numerator = max(0.1, t600 - self.base_tau_y)
+        
+        ratio = numerator / denominator
+        self.base_n = max(0.1, min(3.32 * np.log10(ratio), 1.2)) 
+        self.base_K = denominator / (511 ** self.base_n)
+        
+        self.surface_temp = 80.0 
+        self.geo_gradient = 1.6  
+
+    def get_temp_at_depth(self, tvd_ft):
+        return self.surface_temp + (self.geo_gradient * (tvd_ft / 100.0))
+
+    def calculate_rheology(self, lgs_pct, temp_f):
+        """Calculates dynamic rheology shifts based on LGS accumulation and Arrhenius thermal degradation."""
+        temp_diff = temp_f - 120.0
+        thermal_factor = np.exp(-0.005 * temp_diff) 
+        
+        phi = min(0.59, lgs_pct / 100.0) 
+        rel_visc = (1.0 - (phi / 0.60)) ** (-2.5 * 0.60)
+        
+        actual_K = self.base_K * thermal_factor * rel_visc
+        actual_tau_y = (self.base_tau_y + (0.8 * lgs_pct)) * (1.0 + (0.001 * temp_diff))
+        
+        r600_sim = actual_tau_y + actual_K * (1022 ** self.base_n)
+        r300_sim = actual_tau_y + actual_K * (511 ** self.base_n)
+        
+        return (round(self.base_n, 3), round(actual_K, 3), round(actual_tau_y, 1), 
+                round(r600_sim - r300_sim, 1), round((2*r300_sim)-r600_sim, 1), 
+                round(r600_sim, 1), round(r300_sim, 1))
+
+    def calculate_hydraulics(self, n, K, tau_y, actual_mw_ppg, depth_ft, hole, dp, gpm, pp, rop_max):
+        """Calculates Equivalent Circulating Density (ECD) and restricts ROP based on overbalance."""
+        annular_cap = (hole**2 - dp**2) / 1029.4
+        vel_ft_min = gpm / annular_cap
+        
+        gamma_a = (2.4 * vel_ft_min / (hole - dp)) * ((2 * n + 1) / (3 * n)) if hole > dp and n > 0 else 10.0
+        tau_w_lb100 = 1.066 * (tau_y + K * (gamma_a ** n))
+        
+        ecd = actual_mw_ppg + (tau_w_lb100 / (15.6 * (hole - dp)) if hole > dp else 0)
+        rop = rop_max * np.exp(-0.3 * max(0, ecd - pp))
+        
+        return round(ecd, 2), round(rop, 1)
