@@ -1,21 +1,17 @@
 import streamlit as st
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# --- 1. IMPORT FROM YOUR MODULAR FILES ---
+# ---> JEMBATAN PENGHUBUNG KE FILE-FILE LAIN <---
 from physics import API_MassBalanceAnalyzer, AdvancedDrillingPhysics, generate_dynamic_log
 from economics import EconomicsAnalyzer
-
-# Import your new OOP classes from equipment.py
 from equipment import (
     SolidControlEquipment, ShaleShaker, Desander, Centrifuge, 
     EquipmentSystemManager, PARTICLE_BINS
 )
 
-# Quick inline definitions for Desilter and MudCleaner using your base class
-# (Since they were not explicitly defined in your previous equipment.py snippet)
+# Inline definitions untuk Desilter dan MudCleaner berdasarkan Base Class Anda
 class Desilter(SolidControlEquipment):
     def __init__(self):
         super().__init__(name="Desilter", base_cost=400.0, chem_penalty=300.0, base_loc=1.5, d50_microns=20.0, sharpness=2.5)
@@ -24,13 +20,8 @@ class MudCleaner(SolidControlEquipment):
     def __init__(self):
         super().__init__(name="Mud Cleaner", base_cost=800.0, chem_penalty=150.0, base_loc=0.8, d50_microns=15.0, sharpness=3.0)
 
-
-# --- 2. THE OOP ADAPTER (BRIDGE BETWEEN UI AND EQUIPMENT CLASSES) ---
+# --- 2. THE OOP ADAPTER (PENERJEMAH UI KE MESIN OOP) ---
 def build_and_evaluate_equipment(shaker_meshes, ds_on, dl_on, mc_on, cf_rpms):
-    """
-    Translates UI inputs into OOP objects, runs a Tromp Curve PSD simulation,
-    and returns a scalar efficiency (mech_X) for the legacy physics engine.
-    """
     equipment_objects = []
     labels = []
 
@@ -57,28 +48,26 @@ def build_and_evaluate_equipment(shaker_meshes, ds_on, dl_on, mc_on, cf_rpms):
             equipment_objects.append(Centrifuge(rpm=rpm))
             labels.append(f"CF({rpm})")
 
-    # Create the System Manager
+    # Membuat System Manager Kaskade
     manager = EquipmentSystemManager(equipment_objects)
 
-    # --- THE PSD MOCK SIMULATION ---
-    # We assume 100 total units of volume, distributed equally across the 10 particle bins (10 units per bin)
-    # This allows us to calculate an "overall effective efficiency" across a wide spectrum of cuttings.
+    # --- SIMULASI MOCK-UP PSD TEORETIS ---
+    # Asumsi 100 satuan volume LGS, didistribusikan merata di 10 ukuran partikel
     mock_psd_in = np.array([10.0] * len(PARTICLE_BINS), dtype=float)
     total_input_volume = np.sum(mock_psd_in)
 
-    # Run the OOP physics
+    # Menjalankan fisika Kaskade Kurva Tromp
     psd_out, total_discarded, total_mud_lost, daily_cost, chem_pen = manager.process_system(mock_psd_in)
 
-    # Calculate overall scalar efficiency for the legacy physics engine
+    # Menghitung efisiensi skalar tunggal untuk mesin fisika lama
     effective_mech_X = total_discarded / total_input_volume
 
-    # Apply Barite Synergy Discount if multiple centrifuges are used
+    # Diskon Sinergi Barite Recovery (Jika CF >= 2)
     if len(cf_rpms) >= 2:
-        chem_pen *= 0.40  # 60% discount
+        chem_pen *= 0.40  
         labels.append("[Barite Rec.]")
 
     return effective_mech_X, daily_cost, chem_pen, labels
-
 
 # --- 3. STREAMLIT FRONT-END UI ---
 st.set_page_config(page_title="Drilling & Solid Control Simulator", layout="wide")
@@ -86,7 +75,7 @@ st.set_page_config(page_title="Drilling & Solid Control Simulator", layout="wide
 if "num_scenarios" not in st.session_state: st.session_state.num_scenarios = 2
 if "sim_done" not in st.session_state: st.session_state.sim_done = False
 
-# Dynamic UI memory
+# Memori dinamis UI
 for i in range(10):
     sn = f"Scenario {chr(65+i)}"
     if f"num_sh_{sn}" not in st.session_state: st.session_state[f"num_sh_{sn}"] = 1
@@ -167,7 +156,7 @@ for i in range(st.session_state.num_scenarios):
             rpm = st.slider(f"Bowl Speed RPM (CF {j+1})", 1500, 3500, 1800 if j == 0 else 3000, 100, key=f"sl_cf_{sc_name}_{j}")
             cf_rpms.append(rpm)
 
-        # CALLING THE OOP ADAPTER HERE
+        # MENGGUNAKAN FUNGSI ADAPTER OOP
         eff_X, cost, chem_pen, eq_labels = build_and_evaluate_equipment(shaker_meshes, ds_on, dl_on, mc_on, cf_rpms)
         
         st.caption(f"**OOP Simulated SRE (X): {eff_X*100:.1f}%** | Rent: ${cost:,.0f}/d | Chem Loss: ${chem_pen:,.0f}/d")
@@ -328,14 +317,23 @@ if st.session_state.sim_done:
         st.subheader("Comprehensive Section & Depth Logs")
         for sc_name, data in sim_res.items():
             st.markdown(f"**{sc_name} Data**")
+            # --- INI ADALAH BAGIAN YANG DIPERBAIKI (Tanda kutip tunggal di luar) ---
             df = pd.DataFrame({
                 "Depth (ft)": data["depth"], 
                 "Lithology": data["lithology"],
-                "Hole (\")": data["hole"], 
+                'Hole (")': data["hole"], 
                 "Gen. LGS (%)": data["lgs"], 
                 "Total Solids (%)": data["total_solids"],
                 "Base MW (ppg)": data["base_mw"], 
                 "Actual MW (ppg)": data["actual_mw"], 
                 "HB 'n'": data["hb_n"], 
                 "HB 'K'": data["hb_k"], 
-                "
+                "HB 'Tau_y'": data["hb_tau"],
+                "PV (cP)": data["pv"], 
+                "YP (lb/100ft2)": data["yp"], 
+                "Fann 600": data["r600"], 
+                "Fann 300": data["r300"]
+            })
+            st.dataframe(df, use_container_width=True, hide_index=True)
+else:
+    st.info("👈 Konfigurasi parameter sumur dan pengaturan alat di menu samping, lalu klik tombol 'Run Physics & Mass Balance'.")
