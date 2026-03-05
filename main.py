@@ -10,14 +10,6 @@ from equipment import (
     EquipmentSystemManager, PARTICLE_BINS
 )
 
-# Inline definitions untuk Desilter dan MudCleaner berdasarkan Base Class Anda
-class Desilter(SolidControlEquipment):
-    def __init__(self):
-        super().__init__(name="Desilter", base_cost=400.0, chem_penalty=300.0, base_loc=1.5, d50_microns=20.0, sharpness=2.5)
-
-class MudCleaner(SolidControlEquipment):
-    def __init__(self):
-        super().__init__(name="Mud Cleaner", base_cost=800.0, chem_penalty=150.0, base_loc=0.8, d50_microns=15.0, sharpness=3.0)
 
 # --- 2. THE OOP ADAPTER (PENERJEMAH UI KE MESIN OOP) ---
 def build_and_evaluate_equipment(shaker_meshes, ds_on, dl_on, mc_on, cf_rpms):
