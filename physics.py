@@ -8,7 +8,7 @@ class AdvancedDrillingPhysics:
         self.base_pv = max(1.0, t600 - t300)
         self.base_yp = max(1.0, t300 - self.base_pv)
         self.base_tau_y = max(0.1, t3) 
-
+        
         self.surface_temp = 80.0 
         self.geo_gradient = 1.6  
 
@@ -29,11 +29,11 @@ class AdvancedDrillingPhysics:
         exponential model, preventing infinite mathematical explosion.
         """
         phi = lgs_pct / 100.0
-
+        
         # Empirical constants for particle friction (Kp) and electrochemical attraction (Ky)
         Kp = 4.0 
         Ky = 6.0 
-
+        
         # Exponential growth based on LGS volume fraction
         actual_pv = self.base_pv * np.exp(Kp * phi)
         actual_yp = self.base_yp * np.exp(Ky * phi)
@@ -42,14 +42,14 @@ class AdvancedDrillingPhysics:
         # Thermal degradation (Arrhenius Equation)
         temp_diff = temp_f - 120.0
         thermal_factor = np.exp(-0.002 * temp_diff) 
-
+        
         actual_pv *= thermal_factor
         actual_yp *= thermal_factor
-
+        
         # Back-calculate API RP 13D Fann Dial Readings to reflect reality
         r300 = actual_pv + actual_yp
         r600 = actual_pv + r300
-
+        
         # Power Law metrics for Hydraulics
         n_api = 3.32 * np.log10(r600 / r300) if r300 > 0 else 1.0
         k_api = r300 / (511 ** n_api) if n_api > 0 else 0.0
@@ -60,13 +60,11 @@ class AdvancedDrillingPhysics:
     def calculate_hydraulics(self, n, K, tau_y, actual_mw_ppg, depth_ft, hole, dp, gpm, pp, rop_max):
         annular_cap = (hole**2 - dp**2) / 1029.4
         vel_ft_min = gpm / annular_cap
-
+        
         gamma_a = (2.4 * vel_ft_min / (hole - dp)) * ((2 * n + 1) / (3 * n)) if hole > dp and n > 0 else 10.0
         tau_w_lb100 = 1.066 * (tau_y + K * (gamma_a ** n))
-
+        
         ecd = actual_mw_ppg + (tau_w_lb100 / (15.6 * (hole - dp)) if hole > dp else 0)
         rop = rop_max * np.exp(-0.3 * max(0, ecd - pp))
-
+        
         return round(ecd, 2), round(rop, 1)
-
-# Force rebuild container
