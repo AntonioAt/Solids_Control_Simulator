@@ -57,4 +57,37 @@ class Centrifuge(SolidControlEquipment):
         # Cuts ultra-fine/colloidal particles (~ 5 microns). Low LOC (Dry/Paste discharge).
         d50_approx = max(2.0, 15.0 - (rpm / 500.0))
         super().__init__(name=f"Centrifuge ({rpm} RPM)", base_cost=1500.0, chem_penalty=1200.0, base_loc=0.4, d50_microns=d50_approx, sharpness=1.5)
+class EquipmentSystemManager:
+    def __init__(self, equipment_list):
+        """
+        Menerima list objek peralatan yang disusun berurutan.
+        Contoh: [ShaleShaker(120), Desander(), Centrifuge(2500)]
+        """
+        self.equipments = equipment_list
+
+    def process_system(self, initial_psd_volume_array):
+        """
+        Mensimulasikan aliran lumpur melewati seluruh kaskade alat.
+        """
+        current_psd = initial_psd_volume_array.copy()
+        
+        total_system_discarded = 0.0
+        total_system_mud_lost = 0.0
+        total_chem_penalty = 0.0
+        total_daily_cost = 0.0
+
+        # Lumpur mengalir secara kaskade dari alat ke alat
+        for eq in self.equipments:
+            # Sisa debu dari alat sebelumnya dimasukkan ke alat ini
+            current_psd, discarded_vol, mud_lost = eq.process_fluid(current_psd)
+            
+            # Akumulasi biaya dan volume yang terbuang
+            total_system_discarded += discarded_vol
+            total_system_mud_lost += mud_lost
+            total_chem_penalty += eq.chem_penalty
+            total_daily_cost += eq.base_cost
+
+        # current_psd yang tersisa adalah debu yang lolos dan meracuni sistem
+        return current_psd, total_system_discarded, total_system_mud_lost, total_daily_cost, total_chem_penalty
+
 
