@@ -1,0 +1,20 @@
+class EconomicsAnalyzer:
+    def __init__(self, rig_rate, bit_cost=25000.0):
+        self.rig_rate = rig_rate
+        self.bit_cost = bit_cost
+
+    def calculate_time_cost(self, avg_rop, length_ft, avg_lgs, daily_equip_cost, daily_chem_penalty):
+        """
+        Evaluates the total time required for an interval and computes macroscopic costs,
+        including rig lease rates and chemical penalties driven by high LGS.
+        """
+        d_hrs = (length_ft / avg_rop) if avg_rop > 0 else 9999.0
+        
+        # Time formulation includes drilling time, tripping time estimate, and LGS conditioning penalties
+        t_days = (d_hrs + (length_ft / 1000.0) + (10.0 if avg_lgs > 8.0 else 0)) / 24.0
+        
+        rig_c = self.rig_rate * t_days
+        chem_c = daily_chem_penalty * t_days
+        total_c = rig_c + self.bit_cost + (daily_equip_cost * t_days) + chem_c
+        
+        return t_days, total_c, rig_c, chem_c
