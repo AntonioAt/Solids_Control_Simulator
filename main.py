@@ -4,7 +4,6 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# Flat folder imports (No 'src.' prefix)
 from physics import AdvancedDrillingPhysics
 from economics import EconomicsAnalyzer
 from equipment import (
@@ -224,7 +223,47 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
                     hgs_pct = (v_hgs / v_active) * 100.0
                     total_solids_pct = lgs_pct + hgs_pct
 
+                    # --- BASE CONTINUOUS DILUTION (Field Reality) ---
+                    # To prevent physical impossibility (100% rock in the mud tank),
+                    # a constant trickle of fresh mud is added per foot drilled.
+                    # Parameter: 0.5 bbl of fresh fluid pumped per foot of drilling.
+                    dilution_rate_bbl_per_ft = 0.5 
+                    v_base_dilution = dilution_rate_bbl_per_ft * delta_depth
                     
+                    # 4. VOLUME ADDITIVITY & PIT MANAGEMENT
+                    v_lgs += v_retained_step
+                    
+                    # New total volume now includes the retained rock PLUS the continuous dilution
+                    v_new_total = v_active + v_retained_step + v_base_dilution - v_mud_lost_step
+                    
+                    # Add the components of the fresh dilution mud (Barite + Water)
+                    v_hgs += f_hgs_base * v_base_dilution
+                    v_water += (1.0 - f_hgs_base) * v_base_dilution
+                    
+                    # Log the economics of this continuous dilution
+                    t_vm += v_base_dilution
+                    t_mud_c += v_base_dilution * mud_price
+
+                    if v_new_total > v_active:
+                        # Tank Overflow - Mud is dumped (carrying old LGS/HGS with it)
+                        v_overflow = v_new_total - v_active
+                        ratio_buang = v_overflow / v_new_total
+                        v_lgs *= (1.0 - ratio_buang)
+                        v_hgs *= (1.0 - ratio_buang)
+                        v_water *= (1.0 - ratio_buang)
+                        t_waste += v_overflow
+                    elif v_new_total < v_active:
+                        # Mud Level Dropped - Add Fresh Make-up Mud
+                        v_makeup = v_active - v_new_total
+                        v_hgs += f_hgs_base * v_makeup
+                        v_water += (1.0 - f_hgs_base) * v_makeup
+                        t_vm += v_makeup
+                        t_mud_c += v_makeup * mud_price
+
+                    # Calculate Actual Concentrations
+                    lgs_pct = (v_lgs / v_active) * 100.0
+                    hgs_pct = (v_hgs / v_active) * 100.0
+                    total_solids_pct = lgs_pct + hgs_pct                    
                     # 6. RHEOLOGY & HYDRAULICS (Bourgoyne et al.)
                     temp = engine.get_temp_at_depth(d)
                     actual_mw = engine.calculate_actual_density(step_base_mw, lgs_pct, hgs_pct)
