@@ -156,14 +156,17 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
             total_solids_discarded_bbl = 0
 
             # --- API RP 13C MASS BALANCE INITIALIZATION ---
-            v_active = 1000.0 # Standard active pit volume (bbl)
+            v_active_surface = 1000.0 # Standard surface active pit volume (bbl)
+            v_hole = 0.0 # Inisialisasi volume lubang bor (0 bbl di permukaan)
+            v_sys = v_active_surface + v_hole # Total Circulating Volume
+            
             base_mw = sc_data["sections"][0]["log"][0][1] 
             
-            # Initial Mud Composition (Water + Barite)
+            # Initial Mud Composition (Water + Barite) untuk SELURUH sistem
             f_hgs_base = (base_mw - 8.33) / (35.0 - 8.33)
-            v_hgs = f_hgs_base * v_active
+            v_hgs = f_hgs_base * v_sys
             v_lgs = 0.0
-            v_water = v_active - v_hgs
+            v_water = v_sys - v_hgs
 
             for sec in sc_data["sections"]:
                 avg_rop = 0
@@ -199,60 +202,65 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
                     t_waste += (v_discarded_step + v_mud_lost_step)
                     t_disp_c += (v_discarded_step + v_mud_lost_step) * disp_price
 
-                    # --- BASE CONTINUOUS DILUTION (Field Reality) ---
-                    # To prevent physical impossibility (100% rock in the mud tank),
-                    # a constant trickle of fresh mud is added per foot drilled.
-                    # Parameter: 0.5 bbl of fresh fluid pumped per foot of drilling.
+                    # =========================================================
+                    # 4. VOLUME ADDITIVITY & DYNAMIC HOLE CAPACITY
+                    # =========================================================
+                    # Hitung volume lubang bor baru yang tercipta dan WAJIB diisi lumpur
+                    delta_v_hole = ((sec['hole']**2) / 1029.4) * delta_depth
+                    v_hole += delta_v_hole
+                    v_req_sys = v_active_surface + v_hole # Kapasitas total sistem bertambah
+                    
+                    # --- BASE CONTINUOUS DILUTION ---
                     dilution_rate_bbl_per_ft = 0.5 
                     v_base_dilution = dilution_rate_bbl_per_ft * delta_depth
                     
-                    # 4. VOLUME ADDITIVITY & PIT MANAGEMENT
+                    # Tambahkan volume baru ke dalam sistem
                     v_lgs += v_retained_step
-                    
-                    # New total volume now includes the retained rock PLUS the continuous dilution
-                    v_new_total = v_active + v_retained_step + v_base_dilution - v_mud_lost_step
-                    
-                    # Add the components of the fresh dilution mud (Barite + Water)
                     v_hgs += f_hgs_base * v_base_dilution
                     v_water += (1.0 - f_hgs_base) * v_base_dilution
                     
-                    # Log the economics of this continuous dilution
                     t_vm += v_base_dilution
                     t_mud_c += v_base_dilution * mud_price
 
-                    if v_new_total > v_active:
-                        # Tank Overflow - Mud is dumped (carrying old LGS/HGS with it)
-                        v_overflow = v_new_total - v_active
+                    # Hitung volume sementara di dalam sistem saat ini
+                    v_new_total = v_sys + v_retained_step + v_base_dilution - v_mud_lost_step
+                    
+                    # 5. PIT MANAGEMENT (Overflow vs Make-up Mud)
+                    if v_new_total > v_req_sys:
+                        # Tangki Luber di Permukaan
+                        v_overflow = v_new_total - v_req_sys
                         ratio_buang = v_overflow / v_new_total
                         v_lgs *= (1.0 - ratio_buang)
                         v_hgs *= (1.0 - ratio_buang)
                         v_water *= (1.0 - ratio_buang)
                         t_waste += v_overflow
                         t_disp_c += v_overflow * disp_price
-                    elif v_new_total < v_active:
-                        # Mud Level Dropped - Add Fresh Make-up Mud
-                        v_makeup = v_active - v_new_total
+                    elif v_new_total < v_req_sys:
+                        # Level Tangki Turun (Kompensasi SCE loss DAN mengisi lubang bor baru)
+                        v_makeup = v_req_sys - v_new_total
                         v_hgs += f_hgs_base * v_makeup
                         v_water += (1.0 - f_hgs_base) * v_makeup
                         t_vm += v_makeup
                         t_mud_c += v_makeup * mud_price
 
+                    # Sinkronisasi volume sistem akhir
+                    v_sys = v_req_sys 
+
                     # =========================================================
-                    # 5. RHEOLOGY & HYDRAULICS (Merasakan efek lumpur kotor)
+                    # 6. KONSENTRASI AKTUAL SEBELUM BATCH DILUTION (LUMPUR KOTOR)
                     # =========================================================
-                    # Hitung LGS aktual saat ini (sebelum ada intervensi Mud Engineer)
-                    lgs_pct = (v_lgs / v_active) * 100.0
-                    hgs_pct = (v_hgs / v_active) * 100.0
+                    # PENTING: Pembagian sekarang menggunakan V_SYS (Volume Total), bukan V_ACTIVE
+                    lgs_pct = (v_lgs / v_sys) * 100.0
+                    hgs_pct = (v_hgs / v_sys) * 100.0
                     total_solids_pct = lgs_pct + hgs_pct
 
+                    # RHEOLOGY & HYDRAULICS (Merasakan efek lumpur kotor)
                     temp = engine.get_temp_at_depth(d)
                     actual_mw = engine.calculate_actual_density(step_base_mw, lgs_pct, hgs_pct)
                     hb_n, hb_k, hb_tau, pv, yp, r600, r300 = engine.calculate_rheology(lgs_pct, temp)
                     ecd, rop = engine.calculate_hydraulics(hb_n, hb_k, hb_tau, actual_mw, d, sec['hole'], sec['dp'], sec['gpm'], pp, rop_max)
 
-                    # =========================================================
-                    # 6. LOGGING (Mencatat kerusakan secara jujur ke tabel)
-                    # =========================================================
+                    # LOGGING (Mencatat kerusakan secara jujur ke tabel)
                     sim_res[sc_name]["hole"].append(sec['hole']); sim_res[sc_name]["lithology"].append(sec['lith'])
                     sim_res[sc_name]["depth"].append(d); sim_res[sc_name]["rop"].append(rop)
                     sim_res[sc_name]["ecd"].append(ecd); sim_res[sc_name]["pp"].append(pp); sim_res[sc_name]["fg"].append(fg)
@@ -270,8 +278,8 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
                     if lgs_pct > target_lgs_des:
                         lgs_dilution_target = 4.5  # Target reset setelah dilusi (buffer)
                         
-                        # Hitung volume buang berdasarkan rumus V_dump = V_sys * (1 - L_new / L_old)
-                        v_dump = v_active * (1.0 - (lgs_dilution_target / lgs_pct))
+                        # Hitung volume buang berdasarkan V_SYS (Volume Sistem Total)
+                        v_dump = v_sys * (1.0 - (lgs_dilution_target / lgs_pct))
                         
                         # Keluarkan volume lama yang kotor dari tangki 
                         v_lgs -= v_dump * (lgs_pct / 100.0)
@@ -287,9 +295,6 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
                         t_disp_c += v_dump * disp_price
                         t_vm += v_dump
                         t_mud_c += v_dump * mud_price
-                        
-                        # Konsentrasi (v_lgs, v_hgs) di dalam tangki otomatis tereset bersih (mendekati 4.5%)
-                        # dan siap digunakan untuk putaran kedalaman (looping) selanjutnya.
 
                 # Macro Economics for the Section
                 econ_res = econ.calculate_time_cost(
