@@ -199,32 +199,6 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
                     t_waste += (v_discarded_step + v_mud_lost_step)
                     t_disp_c += (v_discarded_step + v_mud_lost_step) * disp_price
 
-                    # 4. VOLUME ADDITIVITY & PIT MANAGEMENT
-                    v_lgs += v_retained_step
-                    v_new_total = v_active + v_retained_step - v_mud_lost_step
-                    
-                    if v_new_total > v_active:
-                        # Tank Overflow - Mud is dumped (carrying old LGS/HGS with it)
-                        v_overflow = v_new_total - v_active
-                        ratio_buang = v_overflow / v_new_total
-                        v_lgs *= (1.0 - ratio_buang)
-                        v_hgs *= (1.0 - ratio_buang)
-                        v_water *= (1.0 - ratio_buang)
-                        t_waste += v_overflow
-                        t_disp_c += v_overflow * disp_price
-                    elif v_new_total < v_active:
-                        # Mud Level Dropped - Add Fresh Make-up Mud
-                        v_makeup = v_active - v_new_total
-                        v_hgs += f_hgs_base * v_makeup
-                        v_water += (1.0 - f_hgs_base) * v_makeup
-                        t_vm += v_makeup
-                        t_mud_c += v_makeup * mud_price
-
-                    # Calculate Actual Concentrations
-                    lgs_pct = (v_lgs / v_active) * 100.0
-                    hgs_pct = (v_hgs / v_active) * 100.0
-                    total_solids_pct = lgs_pct + hgs_pct
-
                     # --- BASE CONTINUOUS DILUTION (Field Reality) ---
                     # To prevent physical impossibility (100% rock in the mud tank),
                     # a constant trickle of fresh mud is added per foot drilled.
@@ -254,6 +228,7 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
                         v_hgs *= (1.0 - ratio_buang)
                         v_water *= (1.0 - ratio_buang)
                         t_waste += v_overflow
+                        t_disp_c += v_overflow * disp_price
                     elif v_new_total < v_active:
                         # Mud Level Dropped - Add Fresh Make-up Mud
                         v_makeup = v_active - v_new_total
@@ -262,46 +237,22 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
                         t_vm += v_makeup
                         t_mud_c += v_makeup * mud_price
 
-                    # Calculate Actual Concentrations
+                    # =========================================================
+                    # 5. RHEOLOGY & HYDRAULICS (Merasakan efek lumpur kotor)
+                    # =========================================================
+                    # Hitung LGS aktual saat ini (sebelum ada intervensi Mud Engineer)
                     lgs_pct = (v_lgs / v_active) * 100.0
                     hgs_pct = (v_hgs / v_active) * 100.0
                     total_solids_pct = lgs_pct + hgs_pct
 
-                    # 5. BATCH DILUTION (THRESHOLD TRIGGER)
-                    # Sesuai parameter operasional lapangan: Trigger jika > target_lgs_des (6.0%)
-                    if lgs_pct > target_lgs_des:
-                        lgs_dilution_target = 4.5  # Target LGS setelah dilusi (buffer 1.5%)
-                        
-                        # Hitung volume buang berdasarkan rumus V_dump = V_sys * (1 - L_new / L_old)
-                        v_dump = v_active * (1.0 - (lgs_dilution_target / lgs_pct))
-                        
-                        # Keluarkan volume lama yang kotor dari tangki (membuang LGS, HGS, dan Air proporsional)
-                        v_lgs -= v_dump * (lgs_pct / 100.0)
-                        v_hgs -= v_dump * (hgs_pct / 100.0)
-                        v_water -= v_dump * ((100.0 - lgs_pct - hgs_pct) / 100.0)
-                        
-                        # Masukkan lumpur baru (make-up mud basik: air + barite) sebesar volume yang dibuang
-                        v_hgs += v_dump * f_hgs_base
-                        v_water += v_dump * (1.0 - f_hgs_base)
-                        
-                        # Catat pengeluaran ekonomi (Cost & Waste) yang masif akibat dilusi ini
-                        t_waste += v_dump
-                        t_disp_c += v_dump * disp_price
-                        t_vm += v_dump
-                        t_mud_c += v_dump * mud_price
-                        
-                        # Update konsentrasi aktual setelah dilusi
-                        lgs_pct = (v_lgs / v_active) * 100.0
-                        hgs_pct = (v_hgs / v_active) * 100.0
-                        total_solids_pct = lgs_pct + hgs_pct
-                    
-                    # 6. RHEOLOGY & HYDRAULICS (Bourgoyne et al.)
                     temp = engine.get_temp_at_depth(d)
                     actual_mw = engine.calculate_actual_density(step_base_mw, lgs_pct, hgs_pct)
                     hb_n, hb_k, hb_tau, pv, yp, r600, r300 = engine.calculate_rheology(lgs_pct, temp)
                     ecd, rop = engine.calculate_hydraulics(hb_n, hb_k, hb_tau, actual_mw, d, sec['hole'], sec['dp'], sec['gpm'], pp, rop_max)
 
-                    # LOGGING
+                    # =========================================================
+                    # 6. LOGGING (Mencatat kerusakan secara jujur ke tabel)
+                    # =========================================================
                     sim_res[sc_name]["hole"].append(sec['hole']); sim_res[sc_name]["lithology"].append(sec['lith'])
                     sim_res[sc_name]["depth"].append(d); sim_res[sc_name]["rop"].append(rop)
                     sim_res[sc_name]["ecd"].append(ecd); sim_res[sc_name]["pp"].append(pp); sim_res[sc_name]["fg"].append(fg)
@@ -312,6 +263,33 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
                     sim_res[sc_name]["r600"].append(r600); sim_res[sc_name]["r300"].append(r300)
 
                     avg_rop += rop
+
+                    # =======================================================================
+                    # 7. BATCH DILUTION (Tindakan Mud Engineer mempersiapkan kedalaman BESOK)
+                    # =======================================================================
+                    if lgs_pct > target_lgs_des:
+                        lgs_dilution_target = 4.5  # Target reset setelah dilusi (buffer)
+                        
+                        # Hitung volume buang berdasarkan rumus V_dump = V_sys * (1 - L_new / L_old)
+                        v_dump = v_active * (1.0 - (lgs_dilution_target / lgs_pct))
+                        
+                        # Keluarkan volume lama yang kotor dari tangki 
+                        v_lgs -= v_dump * (lgs_pct / 100.0)
+                        v_hgs -= v_dump * (hgs_pct / 100.0)
+                        v_water -= v_dump * ((100.0 - lgs_pct - hgs_pct) / 100.0)
+                        
+                        # Masukkan lumpur baru (air + barite)
+                        v_hgs += v_dump * f_hgs_base
+                        v_water += v_dump * (1.0 - f_hgs_base)
+                        
+                        # Catat pengeluaran ekonomi (Cost & Waste) akibat dilusi ini
+                        t_waste += v_dump
+                        t_disp_c += v_dump * disp_price
+                        t_vm += v_dump
+                        t_mud_c += v_dump * mud_price
+                        
+                        # Konsentrasi (v_lgs, v_hgs) di dalam tangki otomatis tereset bersih (mendekati 4.5%)
+                        # dan siap digunakan untuk putaran kedalaman (looping) selanjutnya.
 
                 # Macro Economics for the Section
                 econ_res = econ.calculate_time_cost(
@@ -340,7 +318,6 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
         st.session_state['saved_configs'] = scenario_configs
         st.session_state.sim_done = True
                
-
 
 # =============================================================================
 # DASHBOARD VISUALIZATION
