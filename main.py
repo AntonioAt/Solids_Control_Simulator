@@ -125,7 +125,7 @@ SCENARIO_COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e
 # CORE SIMULATION ENGINE TRIGGER
 # =============================================================================
 if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container_width=True):
-    with st.spinner("Executing API RP 13C Mass Balance & Dynamic Stripping..."):
+    with st.spinner("Executing Steady-State Mass Balance & Dynamic Routing..."):
 
         target_lgs_frac = target_lgs_des / 100.0
         
@@ -155,7 +155,7 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
             total_solids_drilled_bbl = 0
             total_solids_discarded_bbl = 0
 
-            # --- API RP 13C MASS BALANCE INITIALIZATION ---
+            # --- MASS BALANCE INITIALIZATION ---
             v_active_surface = 1000.0 # Standard surface active pit volume
             v_hole = 0.0 
             v_sys = v_active_surface + v_hole 
@@ -199,28 +199,34 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
                     t_disp_c += (v_discarded_step + v_mud_lost_step) * disp_price
 
                     # =========================================================
-                    # 3. DYNAMIC HOLE CAPACITY & CONTINUOUS STRIPPING DILUTION
+                    # 3. DYNAMIC HOLE CAPACITY & MASS BALANCE DILUTION
                     # =========================================================
-                    # Hitung kapasitas sistem yang membesar
+                    # Calculate incremental hole volume expansion
                     delta_v_hole = ((sec['hole']**2) / 1029.4) * delta_depth
                     v_hole += delta_v_hole
                     v_req_sys = v_active_surface + v_hole 
                     
-                    # Cek LGS saat ini (evaluasi) untuk memutuskan laju pengenceran
+                    # Evaluate current LGS concentration to determine dilution strategy
                     current_lgs_eval = (v_lgs / v_sys) * 100.0 if v_sys > 0 else 0.0
+                    target_lgs_frac = target_lgs_des / 100.0  
                     
-                    # LOGIKA DYNAMIC STRIPPING (Pengganti Batch Dilution):
-                    # Mud Engineer memutar keran air secara proporsional sesuai tingkat bahaya
+                    # --- HYBRID STEADY-STATE DILUTION LOGIC ---
                     if current_lgs_eval >= target_lgs_des:
-                        dilution_rate_bbl_per_ft = 2.0  # Heavy Dilution / Flushing (Kondisi Ekstrem Bypass)
-                    elif current_lgs_eval >= (target_lgs_des - 1.5):
-                        dilution_rate_bbl_per_ft = 0.8  # Moderate Dilution (Lumpur mulai kotor)
-                    else:
-                        dilution_rate_bbl_per_ft = 0.2  # Base Maintenance (Lumpur bersih)
+                        # Critical condition: Apply strict mass balance dilution equation
+                        # Equation: V_dil = V_solids * ((1 - target) / target)
+                        # This maintains the system exactly at the target maximum limit (Plateau effect)
+                        v_base_dilution = v_retained_step * ((1.0 - target_lgs_frac) / target_lgs_frac)
                         
-                    v_base_dilution = dilution_rate_bbl_per_ft * delta_depth
+                    elif current_lgs_eval >= (target_lgs_des - 1.5):
+                        # Transition zone: Apply partial dilution to slow down accumulation
+                        v_ideal_dilution = v_retained_step * ((1.0 - target_lgs_frac) / target_lgs_frac)
+                        v_base_dilution = v_ideal_dilution * 0.5 
+                        
+                    else:
+                        # Safe zone: Minimal natural maintenance dilution
+                        v_base_dilution = 0.2 * delta_depth 
                     
-                    # Masukkan serbuk bor dan lumpur pengencer ke dalam tangki
+                    # Incorporate retained cuttings and fresh dilution fluid into the active system
                     v_lgs += v_retained_step
                     v_hgs += f_hgs_base * v_base_dilution
                     v_water += (1.0 - f_hgs_base) * v_base_dilution
@@ -234,7 +240,7 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
                     # 4. PIT MANAGEMENT (OVERFLOW & MAKE-UP)
                     # =========================================================
                     if v_new_total > v_req_sys:
-                        # Tangki luber: LGS lama ikut terbuang secara natural, membuat grafik melengkung halus
+                        # System overflow: Discards old solids proportionally, enabling the plateau curve
                         v_overflow = v_new_total - v_req_sys
                         ratio_buang = v_overflow / v_new_total
                         v_lgs *= (1.0 - ratio_buang)
@@ -243,6 +249,7 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
                         t_waste += v_overflow
                         t_disp_c += v_overflow * disp_price
                     elif v_new_total < v_req_sys:
+                        # System level drop: Compensate SCE loss and hole expansion
                         v_makeup = v_req_sys - v_new_total
                         v_hgs += f_hgs_base * v_makeup
                         v_water += (1.0 - f_hgs_base) * v_makeup
