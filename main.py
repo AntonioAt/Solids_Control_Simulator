@@ -224,31 +224,7 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
                     hgs_pct = (v_hgs / v_active) * 100.0
                     total_solids_pct = lgs_pct + hgs_pct
 
-                    # 5. SAFETY DILUTION TRIGGER (if LGS exceeds 6%)
-                    if lgs_pct > target_lgs_des:
-                        v_excess_lgs = v_lgs - (target_lgs_frac * v_active)
-                        phi_lgs = v_lgs / v_active
-                        v_dump = v_excess_lgs / phi_lgs if phi_lgs > 0 else 0
-                        
-                        # Remove dumped mud
-                        v_lgs -= v_dump * phi_lgs
-                        v_hgs -= v_dump * (v_hgs / v_active)
-                        v_water -= v_dump * (v_water / v_active)
-                        
-                        # Replace with fresh mud
-                        v_hgs += v_dump * f_hgs_base
-                        v_water += v_dump * (1.0 - f_hgs_base)
-                        
-                        t_waste += v_dump
-                        t_vm += v_dump
-                        t_mud_c += v_dump * mud_price
-                        t_disp_c += v_dump * disp_price
-                        
-                        # Update after dilution
-                        lgs_pct = (v_lgs / v_active) * 100.0
-                        hgs_pct = (v_hgs / v_active) * 100.0
-                        total_solids_pct = lgs_pct + hgs_pct
-
+                    
                     # 6. RHEOLOGY & HYDRAULICS (Bourgoyne et al.)
                     temp = engine.get_temp_at_depth(d)
                     actual_mw = engine.calculate_actual_density(step_base_mw, lgs_pct, hgs_pct)
