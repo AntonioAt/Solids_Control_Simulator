@@ -15,7 +15,6 @@ from equipment import (
 # =============================================================================
 @st.cache_data
 def generate_dynamic_log(start_d, end_d, pp_base, fg_base, rop_base, step_ft=100):
-    """Generates synthetic depth data points for simulation logging."""
     log = []
     points = np.arange(start_d + step_ft, end_d, step_ft)
     if len(points) == 0 or points[-1] != end_d: 
@@ -87,7 +86,6 @@ scenario_configs = {}
 for i in range(st.session_state.num_scenarios):
     sc_name = f"Scenario {chr(65+i)}" 
     with st.sidebar.expander(f"🛠️ {sc_name} Builder", expanded=(i==0)):
-
         st.markdown("**1. Primary Shakers**")
         s_col1, s_col2 = st.columns(2)
         if s_col1.button("➕ Add Shaker", key=f"add_sh_{sc_name}"): st.session_state[f"num_sh_{sc_name}"] += 1; st.rerun()
@@ -156,7 +154,7 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
             total_solids_discarded_bbl = 0
 
             # --- MASS BALANCE INITIALIZATION ---
-            v_active_surface = 1000.0 # Standard surface active pit volume
+            v_active_surface = 1000.0 
             v_hole = 0.0 
             v_sys = v_active_surface + v_hole 
             
@@ -199,34 +197,33 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
                     t_disp_c += (v_discarded_step + v_mud_lost_step) * disp_price
 
                     # =========================================================
-                    # 3. DYNAMIC HOLE CAPACITY & MASS BALANCE DILUTION
+                    # 3. DYNAMIC HOLE CAPACITY & CAPPED MASS BALANCE DILUTION
                     # =========================================================
-                    # Calculate incremental hole volume expansion
                     delta_v_hole = ((sec['hole']**2) / 1029.4) * delta_depth
                     v_hole += delta_v_hole
                     v_req_sys = v_active_surface + v_hole 
                     
-                    # Evaluate current LGS concentration to determine dilution strategy
                     current_lgs_eval = (v_lgs / v_sys) * 100.0 if v_sys > 0 else 0.0
                     target_lgs_frac = target_lgs_des / 100.0  
                     
-                    # --- HYBRID STEADY-STATE DILUTION LOGIC ---
+                    # --- PHYSICAL LIMIT: PUMP CAPACITY CONSTRAINT ---
+                    # Di lapangan, pompa lumpur tidak bisa memompa volume air tak terbatas.
+                    # Maksimal pengenceran dibatasi sekitar 1.2 bbl per kedalaman 1 ft.
+                    max_dilution_step = 1.2 * delta_depth
+                    
                     if current_lgs_eval >= target_lgs_des:
-                        # Critical condition: Apply strict mass balance dilution equation
-                        # Equation: V_dil = V_solids * ((1 - target) / target)
-                        # This maintains the system exactly at the target maximum limit (Plateau effect)
-                        v_base_dilution = v_retained_step * ((1.0 - target_lgs_frac) / target_lgs_frac)
+                        # Rumus Kesetimbangan Laodi:
+                        v_ideal_dilution = v_retained_step * ((1.0 - target_lgs_frac) / target_lgs_frac)
+                        # Batasi dengan kemampuan maksimum pompa (Jika Bypass, akan melebihi batas ini)
+                        v_base_dilution = min(v_ideal_dilution, max_dilution_step)
                         
                     elif current_lgs_eval >= (target_lgs_des - 1.5):
-                        # Transition zone: Apply partial dilution to slow down accumulation
                         v_ideal_dilution = v_retained_step * ((1.0 - target_lgs_frac) / target_lgs_frac)
-                        v_base_dilution = v_ideal_dilution * 0.5 
+                        v_base_dilution = min(v_ideal_dilution * 0.5, max_dilution_step)
                         
                     else:
-                        # Safe zone: Minimal natural maintenance dilution
                         v_base_dilution = 0.2 * delta_depth 
                     
-                    # Incorporate retained cuttings and fresh dilution fluid into the active system
                     v_lgs += v_retained_step
                     v_hgs += f_hgs_base * v_base_dilution
                     v_water += (1.0 - f_hgs_base) * v_base_dilution
@@ -236,11 +233,8 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
 
                     v_new_total = v_sys + v_retained_step + v_base_dilution - v_mud_lost_step
                     
-                    # =========================================================
                     # 4. PIT MANAGEMENT (OVERFLOW & MAKE-UP)
-                    # =========================================================
                     if v_new_total > v_req_sys:
-                        # System overflow: Discards old solids proportionally, enabling the plateau curve
                         v_overflow = v_new_total - v_req_sys
                         ratio_buang = v_overflow / v_new_total
                         v_lgs *= (1.0 - ratio_buang)
@@ -249,7 +243,6 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
                         t_waste += v_overflow
                         t_disp_c += v_overflow * disp_price
                     elif v_new_total < v_req_sys:
-                        # System level drop: Compensate SCE loss and hole expansion
                         v_makeup = v_req_sys - v_new_total
                         v_hgs += f_hgs_base * v_makeup
                         v_water += (1.0 - f_hgs_base) * v_makeup
@@ -258,9 +251,7 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
 
                     v_sys = v_req_sys 
 
-                    # =========================================================
                     # 5. LOGGING & RHEOLOGY
-                    # =========================================================
                     lgs_pct = (v_lgs / v_sys) * 100.0
                     hgs_pct = (v_hgs / v_sys) * 100.0
                     total_solids_pct = lgs_pct + hgs_pct
@@ -281,24 +272,35 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
 
                     avg_rop += rop
 
-                # Macro Economics for the Section
+                # =========================================================
+                # 6. ECONOMICS WITH RIG FLAT TIME
+                # =========================================================
                 econ_res = econ.calculate_time_cost(
                     avg_rop=avg_rop/len(sec['log']), length_ft=sec['len'], 
                     actual_lgs_pct=lgs_pct, target_lgs_pct=target_lgs_des,
                     daily_equip_cost=sc_data["daily_eq_cost"], daily_chem_penalty=sc_data["chem_penalty"]
                 )
                 
-                t_days += econ_res["total_days"]
-                t_invest += (sc_data["daily_eq_cost"] * econ_res["total_days"])
+                # Tambahkan Flat Time (Non-Productive Time: Tripping, Casing, dll)
+                # Asumsi standar industri: ~1.5 hari flat time untuk setiap 1000 ft sumur dibor
+                flat_time_days = (sec['len'] / 1000.0) * 1.5 
+                
+                # Real days = Pure rotating hours + Flat time hours
+                real_section_days = econ_res["total_days"] + flat_time_days
+                
+                t_days += real_section_days
+                t_invest += (sc_data["daily_eq_cost"] * real_section_days)
                 t_chem_c += econ_res["chem_penalty_cost"]
-                t_cost += econ_res["total_afe_cost"] 
+                
+                # Biaya utama digerakkan oleh total hari operasi nyata
+                t_cost += (real_section_days * rig_rate) 
 
             # Calculate Actual System Efficiency for the dashboard
             final_efficiency = (total_solids_discarded_bbl / total_solids_drilled_bbl) * 100.0 if total_solids_drilled_bbl > 0 else 0
             
             sim_res[sc_name].update({
                 "api_et_avg": final_efficiency,
-                "cost": t_cost + t_mud_c + t_disp_c, 
+                "cost": t_cost + t_mud_c + t_disp_c + t_chem_c, 
                 "days": t_days, "equip_invest": t_invest, 
                 "mud_cost": t_mud_c, "disp_cost": t_disp_c, "chem_cost": t_chem_c, 
                 "total_vm": t_vm, "total_waste": t_waste
@@ -384,57 +386,26 @@ if st.session_state.sim_done:
     with tab2:
         st.subheader("Mass Balance, Time & AFE Economics")
         
-        # --- NEW TABLE: TIME & DRILLING DAYS ---
         st.markdown("#### ⏱️ Time & Operational Days Analysis")
         time_data = {
-            "Metric": [
-                "Average Overall ROP (ft/hr)", 
-                "Total Operational Days (Drilling + Conditioning)", 
-                "Rig Lease Cost Driven by Time ($)"
-            ]
+            "Metric": ["Average Overall ROP (ft/hr)", "Total Operational Days (Drilling + Flat Time)", "Rig Lease Cost Driven by Time ($)"]
         }
         for sc_name, data in sim_res.items():
-            # Calculate the overall average ROP for the entire well
             avg_rop_overall = sum(data["rop"]) / len(data["rop"]) if len(data["rop"]) > 0 else 0
-            
-            # Calculate the explicit cost of the rig based on the days spent
             rig_cost_total = data['days'] * rig_rate
-            
-            time_data[sc_name] = [
-                f"{avg_rop_overall:.1f}", 
-                f"{data['days']:,.1f} Days", 
-                f"${rig_cost_total:,.0f}"
-            ]
+            time_data[sc_name] = [f"{avg_rop_overall:.1f}", f"{data['days']:,.1f} Days", f"${rig_cost_total:,.0f}"]
         st.table(time_data)
 
-        # --- EXISTING TABLE: MATERIAL & FINANCIAL AFE ---
         st.markdown("#### 💰 Material Balance & Final AFE Cost")
         summary_data = {
-            "Metric": [
-                "Equipment Configured", 
-                "Mud Built (Vm) bbls", 
-                "Waste Disposed (Vt) bbls", 
-                "Final System Eff. (Et)", 
-                "1. Mud Cost ($)", 
-                "2. Disposal Cost ($)", 
-                "3. Barite/Chem Pen. ($)", 
-                "4. SRE Capex ($)", 
-                "TOTAL AFE COST ($)"
-            ]
+            "Metric": ["Equipment Configured", "Mud Built (Vm) bbls", "Waste Disposed (Vt) bbls", "Final System Eff. (Et)", "1. Mud Cost ($)", "2. Disposal Cost ($)", "3. Barite/Chem Pen. ($)", "4. SRE Capex ($)", "TOTAL AFE COST ($)"]
         }
         for sc_name, data in sim_res.items():
             labels = saved_configs[sc_name]["labels"]
             eq_str = " + ".join(labels) if labels else "Bypass (No Control)"
             summary_data[sc_name] = [
-                eq_str, 
-                f"{data['total_vm']:,.0f}", 
-                f"{data['total_waste']:,.0f}", 
-                f"{data['api_et_avg']:.1f}%", 
-                f"${data['mud_cost']:,.0f}", 
-                f"${data['disp_cost']:,.0f}", 
-                f"${data['chem_cost']:,.0f}", 
-                f"${data['equip_invest']:,.0f}", 
-                f"${data['cost']:,.0f}"
+                eq_str, f"{data['total_vm']:,.0f}", f"{data['total_waste']:,.0f}", f"{data['api_et_avg']:.1f}%", 
+                f"${data['mud_cost']:,.0f}", f"${data['disp_cost']:,.0f}", f"${data['chem_cost']:,.0f}", f"${data['equip_invest']:,.0f}", f"${data['cost']:,.0f}"
             ]
         st.table(summary_data)
 
