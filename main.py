@@ -382,12 +382,60 @@ if st.session_state.sim_done:
         st.plotly_chart(fig, use_container_width=True, theme=None)
 
     with tab2:
-        st.subheader("Mass Balance & AFE Economics (API Standard)")
-        summary_data = {"Metric": ["Equipment Configured", "Mud Built (Vm) bbls", "Waste Disposed (Vt) bbls", "Final System Eff. (Et)", "1. Mud Cost ($)", "2. Disposal Cost ($)", "3. Barite/Chem Pen. ($)", "4. SRE Capex ($)", "TOTAL AFE COST ($)"]}
+        st.subheader("Mass Balance, Time & AFE Economics")
+        
+        # --- NEW TABLE: TIME & OPERATIONAL DAYS ANALYSIS ---
+        st.markdown("#### ⏱️ Time & Operational Days Analysis")
+        time_data = {
+            "Metric": [
+                "Average Overall ROP (ft/hr)", 
+                "Total Operational Days (Drilling + Conditioning)", 
+                "Rig Lease Cost Driven by Time ($)"
+            ]
+        }
+        for sc_name, data in sim_res.items():
+            # Calculate the overall average ROP for the entire well
+            avg_rop_overall = sum(data["rop"]) / len(data["rop"]) if len(data["rop"]) > 0 else 0
+            
+            # Calculate the explicit cost of the rig based on the days spent
+            rig_cost_total = data['days'] * rig_rate
+            
+            time_data[sc_name] = [
+                f"{avg_rop_overall:.1f}", 
+                f"{data['days']:,.1f} Days", 
+                f"${rig_cost_total:,.0f}"
+            ]
+        st.table(time_data)
+
+        # --- EXISTING TABLE: MATERIAL & FINANCIAL AFE ---
+        st.markdown("#### 💰 Material Balance & Final AFE Cost")
+        summary_data = {
+            "Metric": [
+                "Equipment Configured", 
+                "Mud Built (Vm) bbls", 
+                "Waste Disposed (Vt) bbls", 
+                "Final System Eff. (Et)", 
+                "1. Mud Cost ($)", 
+                "2. Disposal Cost ($)", 
+                "3. Barite/Chem Pen. ($)", 
+                "4. SRE Capex ($)", 
+                "TOTAL AFE COST ($)"
+            ]
+        }
         for sc_name, data in sim_res.items():
             labels = saved_configs[sc_name]["labels"]
             eq_str = " + ".join(labels) if labels else "Bypass (No Control)"
-            summary_data[sc_name] = [eq_str, f"{data['total_vm']:,.0f}", f"{data['total_waste']:,.0f}", f"{data['api_et_avg']:.1f}%", f"${data['mud_cost']:,.0f}", f"${data['disp_cost']:,.0f}", f"${data['chem_cost']:,.0f}", f"${data['equip_invest']:,.0f}", f"${data['cost']:,.0f}"]
+            summary_data[sc_name] = [
+                eq_str, 
+                f"{data['total_vm']:,.0f}", 
+                f"{data['total_waste']:,.0f}", 
+                f"{data['api_et_avg']:.1f}%", 
+                f"${data['mud_cost']:,.0f}", 
+                f"${data['disp_cost']:,.0f}", 
+                f"${data['chem_cost']:,.0f}", 
+                f"${data['equip_invest']:,.0f}", 
+                f"${data['cost']:,.0f}"
+            ]
         st.table(summary_data)
 
     with tab3:
