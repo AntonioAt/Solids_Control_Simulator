@@ -265,7 +265,36 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
                     # Calculate Actual Concentrations
                     lgs_pct = (v_lgs / v_active) * 100.0
                     hgs_pct = (v_hgs / v_active) * 100.0
-                    total_solids_pct = lgs_pct + hgs_pct                    
+                    total_solids_pct = lgs_pct + hgs_pct
+
+                    # 5. BATCH DILUTION (THRESHOLD TRIGGER)
+                    # Sesuai parameter operasional lapangan: Trigger jika > target_lgs_des (6.0%)
+                    if lgs_pct > target_lgs_des:
+                        lgs_dilution_target = 4.5  # Target LGS setelah dilusi (buffer 1.5%)
+                        
+                        # Hitung volume buang berdasarkan rumus V_dump = V_sys * (1 - L_new / L_old)
+                        v_dump = v_active * (1.0 - (lgs_dilution_target / lgs_pct))
+                        
+                        # Keluarkan volume lama yang kotor dari tangki (membuang LGS, HGS, dan Air proporsional)
+                        v_lgs -= v_dump * (lgs_pct / 100.0)
+                        v_hgs -= v_dump * (hgs_pct / 100.0)
+                        v_water -= v_dump * ((100.0 - lgs_pct - hgs_pct) / 100.0)
+                        
+                        # Masukkan lumpur baru (make-up mud basik: air + barite) sebesar volume yang dibuang
+                        v_hgs += v_dump * f_hgs_base
+                        v_water += v_dump * (1.0 - f_hgs_base)
+                        
+                        # Catat pengeluaran ekonomi (Cost & Waste) yang masif akibat dilusi ini
+                        t_waste += v_dump
+                        t_disp_c += v_dump * disp_price
+                        t_vm += v_dump
+                        t_mud_c += v_dump * mud_price
+                        
+                        # Update konsentrasi aktual setelah dilusi
+                        lgs_pct = (v_lgs / v_active) * 100.0
+                        hgs_pct = (v_hgs / v_active) * 100.0
+                        total_solids_pct = lgs_pct + hgs_pct
+                    
                     # 6. RHEOLOGY & HYDRAULICS (Bourgoyne et al.)
                     temp = engine.get_temp_at_depth(d)
                     actual_mw = engine.calculate_actual_density(step_base_mw, lgs_pct, hgs_pct)
