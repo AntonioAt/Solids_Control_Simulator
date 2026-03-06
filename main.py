@@ -197,6 +197,7 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
                     
                     total_solids_discarded_bbl += v_discarded_step
                     t_waste += (v_discarded_step + v_mud_lost_step)
+                    t_disp_c += (v_discarded_step + v_mud_lost_step) * disp_price
 
                     # 4. VOLUME ADDITIVITY & PIT MANAGEMENT
                     v_lgs += v_retained_step
@@ -210,6 +211,7 @@ if st.sidebar.button("Run Physics & Mass Balance", type="primary", use_container
                         v_hgs *= (1.0 - ratio_buang)
                         v_water *= (1.0 - ratio_buang)
                         t_waste += v_overflow
+                        t_disp_c += v_overflow * disp_price
                     elif v_new_total < v_active:
                         # Mud Level Dropped - Add Fresh Make-up Mud
                         v_makeup = v_active - v_new_total
