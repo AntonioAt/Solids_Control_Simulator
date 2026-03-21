@@ -70,4 +70,4 @@ The tool generates performance curves and cost projection charts that identify:
 ## Author
 
 Laodi Antonius Sijabat
-[LinkedIn](https://linkedin.com) | [GitHub](https://github.com/AntonioAt)
+[LinkedIn](https://www.linkedin.com/in/laodi-sijabat-027b75179) | [GitHub](https://github.com/AntonioAt)
